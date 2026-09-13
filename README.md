@@ -23,18 +23,40 @@ Works in a living room or across three time zones. Nobody installs anything.
 The game needs somewhere to keep a room between requests, because serverless functions
 forget everything the moment they return. That's one Redis store and one API key.
 
-1. **Push this repo to GitHub** and import it at [vercel.com/new](https://vercel.com/new).
-   There's no build step and no framework to pick.
-2. **Add a Redis store.** In your Vercel project: Storage → Create → Upstash Redis. Vercel
-   sets `KV_REST_API_URL` and `KV_REST_API_TOKEN` for you. (Any Upstash database works —
-   set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` instead.)
-3. **Add your Anthropic API key** as the `ANTHROPIC_API_KEY` environment variable, from
-   [console.anthropic.com](https://console.anthropic.com/settings/keys).
-4. Redeploy, open the URL, and send it to everyone.
+**1. Import the repo.** Push it to GitHub and open [vercel.com/new](https://vercel.com/new).
+There's no build step and no framework to pick — accept the defaults and deploy.
+
+**2. Add the Redis store.** In your new project: **Storage** → **Create Database** →
+**Upstash** → **Redis**. Pick the free plan and a region near wherever the party is.
+When it asks which project to connect it to, pick this one and tick **all three**
+environments (Production, Preview, Development). Vercel writes the credentials into your
+environment variables for you.
+
+> **The one thing that catches people out.** Upstash gives you two different ways in: a
+> connection string that starts with `redis://`, and a pair of REST credentials. This app
+> uses the REST pair, because that is what works from a serverless function. If your
+> project ends up with only `REDIS_URL`, open the database in the Upstash console, copy
+> **UPSTASH_REDIS_REST_URL** and **UPSTASH_REDIS_REST_TOKEN** from the REST section, and
+> add them to Vercel by hand. `/api/health` tells you if you got this wrong.
+
+**3. Add your Anthropic API key.** **Settings** → **Environment Variables** → add
+`ANTHROPIC_API_KEY`, from [console.anthropic.com](https://console.anthropic.com/settings/keys).
+
+**4. Redeploy.** Vercel only picks up new environment variables on a new deployment:
+**Deployments** → the top one → **⋯** → **Redeploy**.
+
+**5. Check it.** Visit `https://your-app.vercel.app/api/health`, or run:
+
+```bash
+npm run doctor -- https://your-app.vercel.app
+```
+
+It tells you whether the store and the key are both live, and what to fix if not.
 
 | Environment variable | Needed? | What happens without it |
 |---|---|---|
 | `KV_REST_API_URL` + `KV_REST_API_TOKEN` | Yes, in production | Rooms live in one function's memory and players see each other vanish |
+| `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN` | Alternative to the above | Either naming works |
 | `ANTHROPIC_API_KEY` | Strongly recommended | Falls back to plainer questions built from the notes |
 | `ANTHROPIC_MODEL` | No | Defaults to `claude-opus-5` |
 | `ANTHROPIC_EFFORT` | No | Defaults to `high`; drop to `medium` if writing ever times out |
@@ -51,6 +73,9 @@ ANTHROPIC_API_KEY=sk-ant-... node server.js
 
 Rooms are kept in memory, so no Redis is needed. The terminal prints an address like
 `http://192.168.1.42:3000` for everyone else on the wifi.
+
+`npm run doctor` checks this machine the same way, including a real write and read
+against whatever Redis you have configured.
 
 To see what the questions look like before you gather anyone:
 
@@ -137,7 +162,7 @@ src/game.js        rules: phases, scoring, who may see what
 src/llm.js         the brief, the batching, and the validation
 src/questions.js   the offline fallback generator
 src/store.js       Redis in production, memory locally
-test/              96 tests
+test/              102 tests
 ```
 
 There are no sockets. Serverless functions don't stay connected, so every device polls

@@ -13,6 +13,7 @@ import {
 } from './game.js';
 import { fallbackQuestions } from './questions.js';
 import { writeQuestions, claudeIsConfigured } from './llm.js';
+import { storageDiagnosis } from './store.js';
 
 const json = (status, body) => ({ status, json: body });
 const fail = (status, error) => ({ status, json: { error } });
@@ -311,7 +312,24 @@ export async function handleApi({ method, segments, query, body = {}, store, env
   const [head, code, action] = segments;
 
   if (head === 'health' && method === 'GET') {
-    return json(200, { ok: true, storage: store.kind, claude: claudeIsConfigured(env) });
+    const storage = storageDiagnosis(env);
+    const hasClaude = claudeIsConfigured(env);
+    return json(200, {
+      ok: true,
+      ready: storage.kind === 'redis' && hasClaude,
+      storage: store.kind,
+      claude: hasClaude,
+      // One message per thing that needs fixing, so a checker can show each once.
+      issues: {
+        storage: storage.problem
+          ?? (storage.kind === 'memory'
+            ? 'Players on different devices will not see the same room.'
+            : null),
+        claude: hasClaude
+          ? null
+          : 'Questions fall back to the simpler offline set.'
+      }
+    });
   }
 
   if (head === 'rooms' && !code && method === 'POST') {

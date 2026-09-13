@@ -185,3 +185,45 @@ test('redis is used when credentials are present, memory otherwise', () => {
 test('a trailing slash on the Redis URL does not become a double slash', () => {
   assert.equal(redisConfig({ KV_REST_API_URL: 'https://x/', KV_REST_API_TOKEN: 't' }).url, 'https://x');
 });
+
+test('the TCP connection string is recognised as the wrong credential', async () => {
+  const { storageDiagnosis } = await import('../src/store.js');
+
+  const tcpOnly = storageDiagnosis({ REDIS_URL: 'redis://default:pw@db.upstash.io:6379' });
+  assert.equal(tcpOnly.kind, 'memory');
+  assert.equal(tcpOnly.ok, false);
+  assert.match(tcpOnly.problem, /REST/);
+
+  const tcpInRestSlot = storageDiagnosis({
+    KV_REST_API_URL: 'rediss://default:pw@db.upstash.io:6379',
+    KV_REST_API_TOKEN: 'token'
+  });
+  assert.equal(tcpInRestSlot.ok, false);
+  assert.match(tcpInRestSlot.problem, /https:\/\//);
+});
+
+test('half-configured credentials are reported, not ignored', async () => {
+  const { storageDiagnosis } = await import('../src/store.js');
+  assert.match(storageDiagnosis({ KV_REST_API_URL: 'https://db.upstash.io' }).problem, /token is missing/);
+  assert.match(storageDiagnosis({ KV_REST_API_TOKEN: 'token' }).problem, /URL is missing/);
+});
+
+test('a correct REST pair is accepted under either naming', async () => {
+  const { storageDiagnosis } = await import('../src/store.js');
+  for (const env of [
+    { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 't' },
+    { UPSTASH_REDIS_REST_URL: 'https://db.upstash.io', UPSTASH_REDIS_REST_TOKEN: 't' }
+  ]) {
+    const diagnosis = storageDiagnosis(env);
+    assert.equal(diagnosis.kind, 'redis');
+    assert.equal(diagnosis.ok, true);
+    assert.equal(diagnosis.problem, undefined);
+  }
+});
+
+test('a store built from broken credentials falls back rather than throwing', async () => {
+  const { createStore } = await import('../src/store.js');
+  const store = createStore({ REDIS_URL: 'redis://x' });
+  assert.equal(store.kind, 'memory');
+  assert.match(store.problem, /REST/);
+});

@@ -309,3 +309,36 @@ test('collecting more notes reopens the lobby', async () => {
   assert.equal(view.questionsReady, 0);
   assert.equal(view.topicCount, 9, 'the notes are still there');
 });
+
+test('health names each deployment problem once', async () => {
+  const { call } = harness();
+
+  const bare = (await call('GET', 'health')).json;
+  assert.equal(bare.ready, false);
+  assert.match(bare.issues.storage, /same room/);
+  assert.match(bare.issues.claude, /offline set/);
+
+  const configured = await handleApi({
+    method: 'GET',
+    segments: ['health'],
+    query: {},
+    body: {},
+    store: createMemoryStore(),
+    env: { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 't', ANTHROPIC_API_KEY: 'k' }
+  });
+  assert.equal(configured.json.issues.storage, null);
+  assert.equal(configured.json.issues.claude, null);
+  assert.equal(configured.json.ready, true);
+});
+
+test('health explains the TCP-instead-of-REST mistake', async () => {
+  const result = await handleApi({
+    method: 'GET',
+    segments: ['health'],
+    query: {},
+    body: {},
+    store: createMemoryStore(),
+    env: { REDIS_URL: 'redis://default:pw@db.upstash.io:6379', ANTHROPIC_API_KEY: 'k' }
+  });
+  assert.match(result.json.issues.storage, /KV_REST_API_URL/);
+});

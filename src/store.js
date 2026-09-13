@@ -188,10 +188,62 @@ export function createRedisStore({ url, token, fetchImpl = fetch }) {
   };
 }
 
+/**
+ * Work out what storage this deployment actually has, and say so plainly.
+ *
+ * The failure worth catching: Upstash hands out two different things — a TCP
+ * connection string (`redis://…`) and a pair of REST credentials. This app talks
+ * REST, because that is what works from a serverless function. If only the TCP
+ * URL is present the app would quietly fall back to memory and the game would
+ * break in a baffling way mid-party, so it is called out instead.
+ */
+export function storageDiagnosis(env = process.env) {
+  const config = redisConfig(env);
+  if (config) {
+    if (/^rediss?:\/\//.test(config.url)) {
+      return {
+        kind: 'memory',
+        ok: false,
+        problem: 'The Redis URL is a TCP connection string (redis://…), but this app needs the '
+          + 'REST URL, which looks like https://your-db.upstash.io. Copy the REST URL and REST '
+          + 'token from the Upstash console into KV_REST_API_URL and KV_REST_API_TOKEN.'
+      };
+    }
+    return { kind: 'redis', ok: true };
+  }
+
+  const url = env.KV_REST_API_URL || env.UPSTASH_REDIS_REST_URL || env.REDIS_REST_URL;
+  const token = env.KV_REST_API_TOKEN || env.UPSTASH_REDIS_REST_TOKEN || env.REDIS_REST_TOKEN;
+  if (url && !token) {
+    return { kind: 'memory', ok: false, problem: 'A Redis REST URL is set but its token is missing.' };
+  }
+  if (token && !url) {
+    return { kind: 'memory', ok: false, problem: 'A Redis REST token is set but its URL is missing.' };
+  }
+  if (env.REDIS_URL || env.KV_URL) {
+    return {
+      kind: 'memory',
+      ok: false,
+      problem: 'Found REDIS_URL but no REST credentials. Upstash gives you both: this app needs '
+        + 'the REST pair (KV_REST_API_URL and KV_REST_API_TOKEN), not the redis:// connection string.'
+    };
+  }
+  return {
+    kind: 'memory',
+    ok: true,
+    problem: null,
+    note: 'No Redis configured. Fine on one machine; in production every player needs the same store.'
+  };
+}
+
 /** Redis when it is configured, memory otherwise. */
 export function createStore(env = process.env) {
   const config = redisConfig(env);
-  return config ? createRedisStore(config) : createMemoryStore();
+  const diagnosis = storageDiagnosis(env);
+  if (config && diagnosis.ok) return createRedisStore(config);
+  const store = createMemoryStore();
+  store.problem = diagnosis.problem ?? null;
+  return store;
 }
 
 /** One process-wide store, so local development keeps its rooms between requests. */
