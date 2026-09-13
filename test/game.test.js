@@ -2,217 +2,225 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  createRoom, buildDeck, joinRoom, startGame, submitAnswer, revealAnswer, nextQuestion,
-  backToLobby, leaderboard, playerView, hostView, everyoneAnswered, rerollQuestion,
-  updateQuestion, addCustomQuestion, removeQuestion, moveQuestion, makeRoomCode, authPlayer
+  createRoom, makeRoomCode, makePlayer, makeTopics, cleanTopics, canBuild, startGame,
+  acceptAnswer, scoreRound, roundPoints, revealRound, advance, resetToReady, resetScores,
+  leaderboard, viewFor, sitsOut, currentQuestion, DEFAULT_SETTINGS
 } from '../src/game.js';
 
-const KEYWORDS = ['rock climbing', 'hates cilantro', 'grew up in Idaho', 'golden retriever',
-  'Taylor Swift', 'flannel shirts', 'Dr Pepper', 'The Office', 'juggling', 'camping',
-  'awake at 5am', 'board games'];
-
-function newGame({ count = 3, players = ['Derek', 'Sam'] } = {}) {
-  const room = createRoom({ guestName: 'Hayden', keywords: KEYWORDS, seed: 42 });
-  buildDeck(room, { count });
-  const joined = players.map((name) => joinRoom(room, { name }));
-  return { room, players: joined };
+function question(overrides = {}) {
+  return {
+    id: 'q1',
+    index: 0,
+    prompt: 'It is 11pm on a Tuesday. What is Hayden doing?',
+    options: ['Asleep since nine', 'Reorganising the garage', 'Halfway up a climbing wall', 'Watching the news'],
+    answerIndex: 2,
+    explanation: 'Climbing, obviously.',
+    topicIds: ['t1'],
+    contributorIds: [],
+    ...overrides
+  };
 }
 
-test('room codes are four readable characters and avoid collisions', () => {
-  const existing = new Set();
-  for (let i = 0; i < 200; i++) {
-    const code = makeRoomCode(existing);
-    assert.match(code, /^[A-HJ-NP-Z2-9]{4}$/);
-    assert.ok(!existing.has(code));
-    existing.add(code);
-  }
+function setup({ players = ['Derek', 'Sam', 'Priya'], questions = [question()], settings = {} } = {}) {
+  const room = createRoom({ code: 'ABCD', guestName: 'Hayden', settings });
+  room.questions = questions;
+  const list = [];
+  for (const name of players) list.push(makePlayer(list, { name, isHost: list.length === 0 }));
+  room.hostPlayerId = list[0]?.id ?? null;
+  return { room, players: list, topics: [], answers: {} };
+}
+
+test('room codes read cleanly out loud', () => {
+  for (let i = 0; i < 300; i++) assert.match(makeRoomCode(), /^[A-HJ-NP-Z2-9]{4}$/);
 });
 
 test('players get distinct names and avatars', () => {
-  const { room } = newGame({ players: ['Sam', 'Sam', 'Sam'] });
-  const names = [...room.players.values()].map((player) => player.name);
-  assert.deepEqual(names, ['Sam', 'Sam 2', 'Sam 3']);
-  const avatars = new Set([...room.players.values()].map((player) => player.avatar));
-  assert.equal(avatars.size, 3);
+  const list = [];
+  for (const name of ['Sam', 'Sam', 'Sam']) list.push(makePlayer(list, { name }));
+  assert.deepEqual(list.map((player) => player.name), ['Sam', 'Sam 2', 'Sam 3']);
+  assert.equal(new Set(list.map((player) => player.avatar)).size, 3);
 });
 
-test('a game cannot start without questions or without players', () => {
-  const empty = createRoom({ guestName: 'Hayden', keywords: KEYWORDS });
-  joinRoom(empty, { name: 'Derek' });
-  assert.throws(() => startGame(empty), /questions/i);
+test('notes are trimmed, capped and de-duplicated', () => {
+  assert.deepEqual(cleanTopics(['  climbs  ', 'climbs', '', null, 'CLIMBS', 'bakes']), ['climbs', 'bakes']);
+  assert.equal(cleanTopics(['x'.repeat(200)])[0].length, 80);
+});
 
-  const noPlayers = createRoom({ guestName: 'Hayden', keywords: KEYWORDS });
-  buildDeck(noPlayers, { count: 3 });
-  assert.throws(() => startGame(noPlayers), /joined/i);
+test('notes remember who wrote them', () => {
+  const topics = makeTopics('player-1', ['climbs', 'bakes']);
+  assert.equal(topics.length, 2);
+  assert.ok(topics.every((topic) => topic.playerId === 'player-1'));
+  assert.equal(new Set(topics.map((topic) => topic.id)).size, 2);
+});
+
+test('a game cannot be built from too few notes', () => {
+  const state = setup();
+  assert.equal(canBuild({ ...state, topics: [] }).ok, false);
+  assert.match(canBuild({ ...state, topics: [] }).reason, /more thing/i);
+  const topics = makeTopics('p1', ['a', 'b', 'c', 'd', 'e', 'f']);
+  assert.equal(canBuild({ ...state, topics }).ok, true);
+});
+
+test('whoever wrote the note sits the question out', () => {
+  const state = setup({ questions: [question({ contributorIds: ['author'] })] });
+  assert.equal(sitsOut(currentQuestion({ ...state.room, currentIndex: 0 }), 'author'), true);
+  assert.equal(sitsOut(currentQuestion({ ...state.room, currentIndex: 0 }), 'someone-else'), false);
+});
+
+test('a sitting-out player cannot answer their own question', () => {
+  const state = setup();
+  state.room.questions = [question({ contributorIds: [state.players[0].id] })];
+  startGame(state.room, 1000);
+  const result = acceptAnswer({
+    room: state.room, player: state.players[0], questionId: 'q1', choice: 2, existingAnswer: null
+  }, 1100);
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'your-question');
+});
+
+test('answers are refused when late, repeated, stale or out of range', () => {
+  const state = setup();
+  const player = state.players[1];
+  const base = { room: state.room, player, questionId: 'q1', existingAnswer: null };
+
+  assert.equal(acceptAnswer({ ...base, choice: 0 }).reason, 'not-accepting');
+  startGame(state.room, 1000);
+  assert.equal(acceptAnswer({ ...base, questionId: 'nope', choice: 0 }, 1100).reason, 'stale-question');
+  assert.equal(acceptAnswer({ ...base, choice: 9 }, 1100).reason, 'bad-choice');
+  assert.equal(acceptAnswer({ ...base, choice: 2, existingAnswer: { choice: 1 } }, 1100).reason, 'already-answered');
+
+  const late = 1000 + DEFAULT_SETTINGS.questionSeconds * 1000 + DEFAULT_SETTINGS.graceMs + 1;
+  assert.equal(acceptAnswer({ ...base, choice: 2 }, late).reason, 'too-late');
+  // Just inside the grace window still counts — phones are slow.
+  const justInTime = 1000 + DEFAULT_SETTINGS.questionSeconds * 1000 + 100;
+  assert.equal(acceptAnswer({ ...base, choice: 2 }, justInTime).ok, true);
 });
 
 test('a correct answer scores more the faster it lands', () => {
-  const fast = newGame({ players: ['Fast'] });
-  startGame(fast.room, 1000);
-  submitAnswer(fast.room, fast.players[0].id,
-    { questionId: fast.room.questions[0].id, choice: fast.room.questions[0].answerIndex }, 1500);
-  revealAnswer(fast.room, 2000);
-
-  const slow = newGame({ players: ['Slow'] });
-  startGame(slow.room, 1000);
-  submitAnswer(slow.room, slow.players[0].id,
-    { questionId: slow.room.questions[0].id, choice: slow.room.questions[0].answerIndex }, 21000);
-  revealAnswer(slow.room, 22000);
-
-  const fastScore = leaderboard(fast.room)[0].score;
-  const slowScore = leaderboard(slow.room)[0].score;
-  assert.ok(fastScore > slowScore, `${fastScore} should beat ${slowScore}`);
-  assert.ok(slowScore >= 600, 'a slow correct answer still earns the base points');
+  const state = setup();
+  startGame(state.room, 0);
+  const quick = scoreRound({
+    ...state, answers: { [state.players[0].id]: { choice: 2, correct: true, elapsedMs: 500 } }
+  })[0].score;
+  const slow = scoreRound({
+    ...state, answers: { [state.players[0].id]: { choice: 2, correct: true, elapsedMs: 24000 } }
+  })[0].score;
+  assert.ok(quick > slow, `${quick} should beat ${slow}`);
+  assert.ok(slow >= DEFAULT_SETTINGS.basePoints);
 });
 
-test('a wrong answer scores nothing and breaks the streak', () => {
-  const { room, players } = newGame();
-  startGame(room, 0);
-  const first = room.questions[0];
-  submitAnswer(room, players[0].id, { questionId: first.id, choice: first.answerIndex }, 100);
-  submitAnswer(room, players[1].id, { questionId: first.id, choice: (first.answerIndex + 1) % 4 }, 100);
-  revealAnswer(room, 200);
-
-  const board = leaderboard(room);
-  assert.equal(board[0].name, 'Derek');
-  assert.ok(board[0].score > 0);
-  assert.equal(board[1].score, 0);
-  assert.equal(room.players.get(players[1].id).streak, 0);
+test('a wrong answer scores nothing and resets the streak', () => {
+  const state = setup();
+  state.players[1].streak = 3;
+  startGame(state.room, 0);
+  const scored = scoreRound({
+    ...state, answers: { [state.players[1].id]: { choice: 0, correct: false, elapsedMs: 900 } }
+  });
+  const player = scored.find((candidate) => candidate.id === state.players[1].id);
+  assert.equal(player.score, 0);
+  assert.equal(player.streak, 0);
 });
 
-test('a streak adds a growing bonus', () => {
-  const { room, players } = newGame({ count: 3, players: ['Streak'] });
-  startGame(room, 0);
-  const scores = [];
-  for (let i = 0; i < 3; i++) {
-    const question = room.questions[i];
-    submitAnswer(room, players[0].id, { questionId: question.id, choice: question.answerIndex }, 100);
-    revealAnswer(room, 200);
-    scores.push(leaderboard(room)[0].score);
-    nextQuestion(room, 300);
+test('a streak pays more each round, up to a cap', () => {
+  const state = setup();
+  startGame(state.room, 0);
+  const gains = [];
+  let players = state.players;
+  for (let i = 0; i < 6; i++) {
+    const answers = { [players[0].id]: { choice: 2, correct: true, elapsedMs: 0 } };
+    const before = players[0].score;
+    players = scoreRound({ ...state, players, answers });
+    gains.push(players[0].score - before);
   }
-  const gains = [scores[0], scores[1] - scores[0], scores[2] - scores[1]];
-  assert.ok(gains[1] > gains[0], 'the second correct answer should out-earn the first');
-  assert.ok(gains[2] > gains[1], 'the third should out-earn the second');
+  assert.ok(gains[1] > gains[0]);
+  assert.ok(gains[2] > gains[1]);
+  assert.equal(gains.at(-1) - gains[0], DEFAULT_SETTINGS.maxStreakBonus, 'the bonus stops growing');
 });
 
-test('answers are refused when they are late, duplicated, or out of range', () => {
-  const { room, players } = newGame();
-  const question = room.questions[0];
-  assert.equal(submitAnswer(room, players[0].id, { questionId: question.id, choice: 0 }).reason, 'not-accepting');
-
-  startGame(room, 0);
-  assert.equal(submitAnswer(room, players[0].id, { questionId: 'nope', choice: 0 }).reason, 'stale-question');
-  assert.equal(submitAnswer(room, players[0].id, { questionId: question.id, choice: 9 }).reason, 'bad-choice');
-  assert.equal(submitAnswer(room, players[0].id, { questionId: question.id, choice: 0 }).ok, true);
-  assert.equal(submitAnswer(room, players[0].id, { questionId: question.id, choice: 1 }).reason, 'already-answered');
+test('sitting out neither scores nor breaks a streak', () => {
+  const state = setup({ questions: [question({ contributorIds: ['author'] })] });
+  state.players[0] = { ...state.players[0], id: 'author', streak: 2, score: 900 };
+  startGame(state.room, 0);
+  const scored = scoreRound({ ...state, answers: {} });
+  const author = scored.find((player) => player.id === 'author');
+  assert.equal(author.score, 900);
+  assert.equal(author.streak, 2);
 });
 
-test('revealing twice does not double-score', () => {
-  const { room, players } = newGame();
-  startGame(room, 0);
-  const question = room.questions[0];
-  submitAnswer(room, players[0].id, { questionId: question.id, choice: question.answerIndex }, 100);
-  revealAnswer(room, 200);
-  const once = leaderboard(room)[0].score;
-  revealAnswer(room, 300);
-  assert.equal(leaderboard(room)[0].score, once);
+test('roundPoints reports what each player just earned', () => {
+  const state = setup();
+  startGame(state.room, 0);
+  const answers = {
+    [state.players[0].id]: { choice: 2, correct: true, elapsedMs: 0 },
+    [state.players[1].id]: { choice: 0, correct: false, elapsedMs: 0 }
+  };
+  const points = roundPoints({ ...state, answers });
+  assert.ok(points.get(state.players[0].id) > 0);
+  assert.equal(points.get(state.players[1].id), 0);
 });
 
 test('the game ends after the last question', () => {
-  const { room, players } = newGame({ count: 2 });
-  startGame(room, 0);
-  for (let i = 0; i < 2; i++) {
-    revealAnswer(room, 100);
-    nextQuestion(room, 200);
-  }
-  assert.equal(room.phase, 'finished');
-  assert.ok(players.length > 0);
+  const state = setup({ questions: [question(), question({ id: 'q2', index: 1 })] });
+  startGame(state.room, 0);
+  revealRound(state.room, 10);
+  advance(state.room, 20);
+  assert.equal(state.room.phase, 'question');
+  assert.equal(state.room.currentIndex, 1);
+  revealRound(state.room, 30);
+  advance(state.room, 40);
+  assert.equal(state.room.phase, 'finished');
 });
 
-test('everyoneAnswered notices when the room is done', () => {
-  const { room, players } = newGame();
-  startGame(room, 0);
-  const question = room.questions[0];
-  submitAnswer(room, players[0].id, { questionId: question.id, choice: 0 }, 10);
-  assert.equal(everyoneAnswered(room), false);
-  submitAnswer(room, players[1].id, { questionId: question.id, choice: 1 }, 20);
-  assert.equal(everyoneAnswered(room), true);
+test('playing again keeps the deck and clears the scores', () => {
+  const state = setup();
+  startGame(state.room, 0);
+  const players = resetScores(scoreRound({
+    ...state, answers: { [state.players[0].id]: { choice: 2, correct: true, elapsedMs: 0 } }
+  }));
+  resetToReady(state.room);
+  assert.equal(state.room.phase, 'ready');
+  assert.equal(state.room.currentIndex, -1);
+  assert.ok(players.every((player) => player.score === 0 && player.streak === 0));
 });
 
-test("a player's view never leaks the answer before the reveal", () => {
-  const { room, players } = newGame();
-  startGame(room, 0);
-  const view = playerView(room, players[0].id);
-  assert.equal(view.question.answerIndex, undefined);
-  assert.equal(view.question.explanation, undefined);
-  assert.equal(view.leaderboard[0].score, undefined, 'mid-question scores stay hidden');
+test('a player view hides the answer until the reveal', () => {
+  const state = setup();
+  startGame(state.room, 0);
+  const during = viewFor(state, state.players[1].id);
+  assert.equal(during.question.answerIndex, undefined);
+  assert.equal(during.question.explanation, undefined);
+  assert.equal(during.players[0].score, undefined, 'live scores stay hidden mid-question');
 
-  revealAnswer(room, 100);
-  const revealed = playerView(room, players[0].id);
-  assert.equal(revealed.question.answerIndex, room.questions[0].answerIndex);
-  assert.ok(typeof revealed.leaderboard[0].score === 'number');
+  revealRound(state.room, 100);
+  const after = viewFor(state, state.players[1].id);
+  assert.equal(after.question.answerIndex, 2);
+  assert.equal(typeof after.players[0].score, 'number');
 });
 
-test('the host view keeps the answers', () => {
-  const { room } = newGame();
-  startGame(room, 0);
-  const view = hostView(room);
-  assert.equal(view.question.answerIndex, room.questions[0].answerIndex);
-  assert.equal(view.questions.length, 3);
+test('no view ever contains the raw notes', () => {
+  const state = setup();
+  state.topics = makeTopics(state.players[0].id, ['secretly loves karaoke']);
+  const serialized = JSON.stringify(viewFor(state, state.players[1].id));
+  assert.ok(!serialized.includes('karaoke'), 'notes must never be sent to other players');
+  assert.equal(JSON.parse(serialized).topicCount, 1, 'but the count is fine to show');
 });
 
-test('playing again resets scores but keeps the deck and the players', () => {
-  const { room, players } = newGame();
-  startGame(room, 0);
-  const question = room.questions[0];
-  submitAnswer(room, players[0].id, { questionId: question.id, choice: question.answerIndex }, 100);
-  revealAnswer(room, 200);
-  assert.ok(leaderboard(room)[0].score > 0);
-
-  backToLobby(room);
-  assert.equal(room.phase, 'setup');
-  assert.equal(room.questions.length, 3);
-  assert.equal(room.players.size, 2);
-  assert.equal(leaderboard(room)[0].score, 0);
+test('the reveal credits whoever wrote the note', () => {
+  const state = setup();
+  state.room.questions = [question({ contributorIds: [state.players[0].id] })];
+  startGame(state.room, 0);
+  revealRound(state.room, 10);
+  const view = viewFor(state, state.players[1].id);
+  assert.deepEqual(view.question.contributors, [state.players[0].name]);
+  assert.equal(viewFor(state, state.players[0].id).question.youSitOut, true);
 });
 
-test('the host can reroll, edit, add, move and remove questions', () => {
-  const { room } = newGame({ count: 3 });
-  const original = { ...room.questions[0] };
-  const rerolled = rerollQuestion(room, original.id, 12345);
-  assert.equal(rerolled.id, original.id);
-  assert.notDeepEqual(rerolled.options, original.options);
-
-  updateQuestion(room, original.id, { prompt: 'Custom prompt?', options: ['a', 'b', 'c'], answerIndex: 2 });
-  assert.equal(room.questions[0].prompt, 'Custom prompt?');
-  assert.equal(room.questions[0].answerIndex, 2);
-
-  // An answer index past the end of the option list is clamped, never left dangling.
-  updateQuestion(room, original.id, { answerIndex: 99 });
-  assert.equal(room.questions[0].answerIndex, 2);
-
-  const custom = addCustomQuestion(room, { prompt: 'Mine?', options: ['x', 'y'], answerIndex: 1 });
-  assert.equal(room.questions.at(-1).id, custom.id);
-
-  moveQuestion(room, custom.id, 'up');
-  assert.equal(room.questions[2].id, custom.id);
-  assert.deepEqual(room.questions.map((question) => question.index), [0, 1, 2, 3]);
-
-  removeQuestion(room, custom.id);
-  assert.equal(room.questions.length, 3);
-  assert.deepEqual(room.questions.map((question) => question.index), [0, 1, 2]);
-});
-
-test('a custom question needs a prompt and at least two options', () => {
-  const { room } = newGame();
-  assert.throws(() => addCustomQuestion(room, { prompt: '', options: ['a', 'b'] }), /prompt/i);
-  assert.throws(() => addCustomQuestion(room, { prompt: 'Hi?', options: ['only one'] }), /options/i);
-});
-
-test('a player token is required to act as that player', () => {
-  const { room, players } = newGame();
-  assert.ok(authPlayer(room, players[0].id, players[0].token));
-  assert.equal(authPlayer(room, players[0].id, 'wrong-token'), null);
-  assert.equal(authPlayer(room, 'nobody', players[0].token), null);
+test('the leaderboard ranks by score then name', () => {
+  const players = [
+    { id: 'a', name: 'Zoe', avatar: '🦊', score: 10, streak: 0, correctCount: 1 },
+    { id: 'b', name: 'Amy', avatar: '🐙', score: 10, streak: 0, correctCount: 1 },
+    { id: 'c', name: 'Max', avatar: '🐢', score: 99, streak: 1, correctCount: 2 }
+  ];
+  assert.deepEqual(leaderboard(players).map((player) => player.name), ['Max', 'Amy', 'Zoe']);
+  assert.deepEqual(leaderboard(players).map((player) => player.rank), [1, 2, 3]);
 });

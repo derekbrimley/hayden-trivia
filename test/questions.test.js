@@ -154,3 +154,45 @@ test('a whole deck never asks for a favourite that the guest dislikes', () => {
     }
   }
 });
+
+test('sentence-length notes only use the shapes that read well', async () => {
+  const { fallbackQuestions } = await import('../src/questions.js');
+  const topics = [
+    'always cold, wears a hoodie indoors in July',
+    'reads three books at once and finishes none',
+    'refuses to eat anything with olives in it',
+    'quotes the same film every single day',
+    'names every houseplant in the apartment',
+    'keeps every receipt since 2014'
+  ].map((text, index) => ({ id: `t${index}`, text, playerId: `p${index % 3}` }));
+
+  const questions = fallbackQuestions({ guestName: 'Hayden', topics, count: 8, seed: 4 });
+  for (const question of questions) {
+    assert.ok(['spot-the-real', 'odd-one-out'].includes(question.style),
+      `long notes should not use "${question.style}"`);
+    for (const option of question.options) {
+      assert.ok(option.length <= 60, `option too long for a phone: ${option}`);
+    }
+  }
+});
+
+test('short keyword-style notes still get the livelier shapes', async () => {
+  const { fallbackQuestions } = await import('../src/questions.js');
+  const topics = ['climbing', 'olives', 'Idaho', 'spreadsheets', 'hoodies', 'sunrise']
+    .map((text, index) => ({ id: `t${index}`, text, playerId: 'p1' }));
+  const styles = new Set(fallbackQuestions({ guestName: 'Hayden', topics, count: 8, seed: 2 })
+    .map((question) => question.style));
+  assert.ok(styles.size > 1, 'a short-note game should mix question shapes');
+});
+
+test('fallback questions credit the notes they came from', async () => {
+  const { fallbackQuestions } = await import('../src/questions.js');
+  const topics = ['climbs', 'bakes', 'hates olives', 'sings badly', 'runs at dawn', 'loses socks']
+    .map((text, index) => ({ id: `t${index}`, text, playerId: `p${index % 2}` }));
+  const questions = fallbackQuestions({ guestName: 'Hayden', topics, count: 6, seed: 9 });
+  assert.ok(questions.every((question) => question.topicIds.length > 0));
+  const known = new Set(topics.map((topic) => topic.id));
+  for (const question of questions) {
+    for (const id of question.topicIds) assert.ok(known.has(id), `unknown note id ${id}`);
+  }
+});

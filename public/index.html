@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Guest of Honor Trivia</title>
+  <meta name="description" content="A party game about the person everyone came to celebrate." />
+  <meta name="theme-color" content="#12101c" />
   <link rel="stylesheet" href="/css/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🎉</text></svg>" />
 </head>
@@ -14,67 +16,183 @@
       <div class="roomcode" id="room-code-label" hidden>Room <b id="room-code"></b></div>
     </div>
 
-    <!-- Join ------------------------------------------------------------- -->
-    <section class="card" id="view-join">
-      <h2>Join the game</h2>
-      <p class="hint">Grab the four-letter code from the big screen.</p>
-      <form id="join-form">
-        <label class="field">Room code
-          <input id="join-code" type="text" inputmode="latin" autocomplete="off"
-                 autocapitalize="characters" spellcheck="false" maxlength="4"
-                 placeholder="ABCD" style="letter-spacing:0.3em;text-transform:uppercase" required />
-        </label>
-        <label class="field">Your name
-          <input id="join-name" type="text" autocomplete="nickname" maxlength="18"
-                 placeholder="What should we call you?" required />
-        </label>
-        <button class="big" type="submit" id="join-button" style="width:100%">Let me in</button>
-      </form>
-      <div class="notice" id="join-error" hidden></div>
-      <p class="muted center" style="margin-top:18px">
-        Hosting the party? <a href="/host" style="color:var(--brand)">Open the host screen</a>.
-      </p>
+    <!-- Landing ---------------------------------------------------------- -->
+    <section id="view-landing">
+      <div class="card" id="card-join">
+        <h2>Join a game</h2>
+        <form id="join-form" class="stack">
+          <label class="field">Room code
+            <input id="join-code" type="text" inputmode="latin" autocomplete="off"
+                   autocapitalize="characters" spellcheck="false" maxlength="4"
+                   placeholder="ABCD" class="code-input" required />
+          </label>
+          <label class="field">Your name
+            <input id="join-name" type="text" autocomplete="nickname" maxlength="18"
+                   placeholder="What should we call you?" required />
+          </label>
+          <button class="big full" type="submit" id="join-button">Join</button>
+        </form>
+        <div class="notice" id="join-error" hidden></div>
+      </div>
+
+      <p class="center muted or-line">or</p>
+
+      <div class="card">
+        <h2>Start a new game</h2>
+        <p class="hint">
+          One person sets this up, everyone else joins with the code. You'll each add a
+          few things you know about the guest of honor, and the questions get written
+          from what the room came up with.
+        </p>
+        <form id="create-form" class="stack">
+          <label class="field">Who are we celebrating?
+            <input id="guest-name" type="text" maxlength="40" placeholder="Hayden" required />
+          </label>
+          <label class="field">Your name
+            <input id="host-name" type="text" autocomplete="nickname" maxlength="18"
+                   placeholder="What should we call you?" required />
+          </label>
+          <details class="tweaks">
+            <summary>Game settings</summary>
+            <div class="inline-fields">
+              <label class="field">Notes each
+                <input id="set-topics" type="number" min="1" max="8" value="3" />
+              </label>
+              <label class="field">Questions
+                <input id="set-count" type="number" min="3" max="30" value="12" />
+              </label>
+              <label class="field">Seconds each
+                <input id="set-seconds" type="number" min="5" max="120" value="25" />
+              </label>
+            </div>
+          </details>
+          <button class="big full" type="submit" id="create-button">Start a room</button>
+        </form>
+        <div class="notice" id="create-error" hidden></div>
+      </div>
     </section>
 
-    <!-- Waiting ---------------------------------------------------------- -->
-    <section class="card center" id="view-lobby" hidden>
-      <div style="font-size:4rem" id="me-avatar">🎈</div>
-      <h2 id="me-name">You're in</h2>
-      <p class="big-status pulse" id="lobby-status">Waiting for the host to start…</p>
-      <p class="hint" id="lobby-guest"></p>
-      <div class="board" id="lobby-board"></div>
+    <!-- Write your notes ------------------------------------------------- -->
+    <section id="view-topics" hidden>
+      <div class="card">
+        <h2 id="topics-title">What do you know about them?</h2>
+        <p class="hint" id="topics-hint"></p>
+        <form id="topics-form" class="stack">
+          <div id="topic-inputs"></div>
+          <button class="big full" type="submit" id="topics-button">That's my list</button>
+        </form>
+        <div class="notice" id="topics-error" hidden></div>
+        <p class="muted center" style="margin-top:14px">
+          Nobody else sees what you wrote. You'll sit out the questions built from your notes.
+        </p>
+      </div>
     </section>
 
-    <!-- Question --------------------------------------------------------- -->
+    <!-- Waiting in the lobby --------------------------------------------- -->
+    <section id="view-lobby" hidden>
+      <div class="card center">
+        <div class="code-plate">
+          <div class="label">Room code</div>
+          <div class="code" id="lobby-code">····</div>
+        </div>
+        <div class="button-row" style="justify-content:center;margin-top:14px">
+          <button class="ghost" id="copy-link">Copy the invite link</button>
+        </div>
+        <p class="muted" id="copy-done" hidden>Link copied.</p>
+      </div>
+
+      <div class="card">
+        <div class="spread">
+          <h2 style="margin:0">In the room</h2>
+          <span class="muted" id="lobby-count"></span>
+        </div>
+        <div class="player-chips" id="lobby-players"></div>
+        <p class="hint" id="lobby-progress" style="margin-top:16px"></p>
+        <div id="host-controls" hidden>
+          <button class="big full" id="build-button">Write the questions</button>
+          <p class="muted center" style="margin-top:10px" id="build-hint"></p>
+        </div>
+        <p class="muted center" id="waiting-for-host" hidden>Waiting for the host to start.</p>
+        <div class="button-row" style="justify-content:center;margin-top:12px">
+          <button class="subtle" id="edit-topics">Change my notes</button>
+        </div>
+        <div class="notice" id="lobby-error" hidden></div>
+      </div>
+    </section>
+
+    <!-- Writing ----------------------------------------------------------- -->
+    <section id="view-building" hidden>
+      <div class="card center stack">
+        <div class="spinner" aria-hidden="true"></div>
+        <h2 id="building-title">Writing the questions…</h2>
+        <p class="hint" id="building-line"></p>
+      </div>
+    </section>
+
+    <!-- Ready ------------------------------------------------------------- -->
+    <section id="view-ready" hidden>
+      <div class="card center stack">
+        <div style="font-size:3.4rem">🎲</div>
+        <h2 id="ready-title"></h2>
+        <p class="hint" id="ready-note"></p>
+        <div id="ready-host" hidden>
+          <button class="big full" id="start-button">Start the game</button>
+          <div class="button-row" style="justify-content:center;margin-top:10px">
+            <button class="subtle" id="reopen-button">Collect more notes</button>
+          </div>
+        </div>
+        <p class="muted" id="ready-wait" hidden>Waiting for the host to start.</p>
+        <div class="board" id="ready-board"></div>
+      </div>
+    </section>
+
+    <!-- Question ---------------------------------------------------------- -->
     <section id="view-question" hidden>
       <div class="card">
         <div class="qmeta">
           <span id="q-counter"></span>
+          <span id="q-answered"></span>
           <span id="q-timer"></span>
         </div>
         <div class="timer"><div class="fill" id="q-fill"></div></div>
         <h2 class="prompt compact" id="q-prompt"></h2>
         <div class="options" id="q-options"></div>
         <p class="reveal-line" id="q-status"></p>
+        <div class="button-row" style="justify-content:center;margin-top:14px">
+          <button class="subtle" id="skip-button" hidden>Everyone's in — reveal it</button>
+        </div>
       </div>
     </section>
 
-    <!-- Reveal ----------------------------------------------------------- -->
-    <section class="card center" id="view-reveal" hidden>
-      <div style="font-size:3.6rem" id="reveal-emoji">🎯</div>
-      <h2 id="reveal-headline"></h2>
-      <p class="reveal-line" id="reveal-detail"></p>
-      <div class="board" id="reveal-board"></div>
+    <!-- Reveal ------------------------------------------------------------ -->
+    <section id="view-reveal" hidden>
+      <div class="card center">
+        <div style="font-size:3.2rem" id="reveal-emoji">🎯</div>
+        <h2 id="reveal-headline"></h2>
+        <p class="reveal-line" id="reveal-answer"></p>
+        <p class="reveal-line muted" id="reveal-because"></p>
+        <div class="board" id="reveal-board"></div>
+        <div class="button-row" style="justify-content:center;margin-top:16px">
+          <button id="next-button" hidden>Next question</button>
+        </div>
+      </div>
     </section>
 
-    <!-- Finished --------------------------------------------------------- -->
-    <section class="card center" id="view-finished" hidden>
-      <h2 id="final-headline">That's a wrap!</h2>
-      <p class="big-status" id="final-detail"></p>
-      <div class="board" id="final-board"></div>
+    <!-- Finished ---------------------------------------------------------- -->
+    <section id="view-finished" hidden>
+      <div class="card center">
+        <h2 id="winner-line">🏆</h2>
+        <div class="podium" id="podium"></div>
+        <p class="big-status" id="final-detail"></p>
+        <div class="board" id="final-board"></div>
+        <div class="button-row" style="justify-content:center;margin-top:18px">
+          <button id="again-button" hidden>Play again</button>
+          <button class="ghost" id="fresh-button" hidden>New notes, new questions</button>
+        </div>
+      </div>
     </section>
   </main>
 
-  <script type="module" src="/js/play.js"></script>
+  <script type="module" src="/js/app.js"></script>
 </body>
 </html>

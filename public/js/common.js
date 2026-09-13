@@ -1,4 +1,4 @@
-/** Shared helpers for the host screen and the player screens. */
+/** Shared helpers. */
 
 export const GLYPHS = ['▲', '◆', '●', '■'];
 
@@ -15,18 +15,12 @@ export function escapeHtml(value) {
 export async function api(path, body, method = 'POST') {
   const response = await fetch(path, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: method === 'GET' ? undefined : { 'Content-Type': 'application/json' },
     body: method === 'GET' ? undefined : JSON.stringify(body ?? {})
   });
   let payload = null;
-  try {
-    payload = await response.json();
-  } catch {
-    payload = null;
-  }
-  if (!response.ok) {
-    throw new Error(payload?.error ?? `Request failed (${response.status})`);
-  }
+  try { payload = await response.json(); } catch { payload = null; }
+  if (!response.ok) throw new Error(payload?.error ?? `Request failed (${response.status})`);
   return payload;
 }
 
@@ -37,76 +31,64 @@ export function showError(node, message) {
   node.hidden = false;
 }
 
-export function showOk(node, message) {
-  if (!node) return;
-  node.textContent = message;
-  node.className = 'notice ok';
-  node.hidden = false;
-}
-
 export function clearNotice(node) {
   if (node) node.hidden = true;
 }
 
 /**
- * Subscribe to a room's event stream.
+ * Poll the room for state.
  *
- * EventSource reconnects on its own, so this mostly exists to keep a clock
- * offset (server time vs. this device's clock) and to show a banner while the
- * connection is down — phones drop the stream every time they sleep.
+ * There is no socket: on a serverless host nothing stays connected between
+ * requests, so every device asks for the current state on a timer. The interval
+ * tightens during a question and relaxes in the lobby.
  */
-export function connect(streamUrl, { onState, onClosed } = {}) {
-  const source = new EventSource(streamUrl);
-  const state = { offsetMs: 0 };
-  let banner = null;
+export function startPolling({ url, onState, onError, intervalFor }) {
+  let timer = null;
+  let stopped = false;
+  let failures = 0;
+  const clock = { offsetMs: 0, now: () => Date.now() + clock.offsetMs };
 
-  const setBanner = (text) => {
-    if (!text) {
-      banner?.remove();
-      banner = null;
-      return;
+  async function tick() {
+    if (stopped) return;
+    try {
+      const state = await api(url(), null, 'GET');
+      failures = 0;
+      if (typeof state.serverTime === 'number') clock.offsetMs = state.serverTime - Date.now();
+      setBanner(null);
+      onState(state);
+    } catch (error) {
+      failures += 1;
+      if (failures >= 3) {
+        setBanner('Reconnecting…');
+        onError?.(error);
+      }
     }
+    if (!stopped) timer = setTimeout(tick, intervalFor());
+  }
+
+  let banner = null;
+  function setBanner(text) {
+    if (!text) { banner?.remove(); banner = null; return; }
     if (!banner) {
       banner = document.createElement('div');
       banner.className = 'connection';
       document.body.append(banner);
     }
     banner.textContent = text;
+  }
+
+  tick();
+  return {
+    clock,
+    refreshNow: () => { clearTimeout(timer); tick(); },
+    stop: () => { stopped = true; clearTimeout(timer); setBanner(null); }
   };
-
-  source.addEventListener('open', () => setBanner(null));
-
-  source.addEventListener('state', (event) => {
-    const data = JSON.parse(event.data);
-    if (typeof data.serverTime === 'number') state.offsetMs = data.serverTime - Date.now();
-    setBanner(null);
-    onState?.(data);
-  });
-
-  source.addEventListener('closed', (event) => {
-    const data = JSON.parse(event.data);
-    source.close();
-    setBanner(null);
-    onClosed?.(data);
-  });
-
-  source.addEventListener('error', () => {
-    if (source.readyState === EventSource.CLOSED) setBanner('Disconnected. Refresh to rejoin.');
-    else setBanner('Reconnecting…');
-  });
-
-  state.now = () => Date.now() + state.offsetMs;
-  state.close = () => source.close();
-  return state;
 }
 
 /** Drive a countdown bar from the server's `timing` block. */
 export function startCountdown({ fillNode, labelNode, timing, now }) {
   let frame = null;
-  const stop = () => {
-    if (frame) cancelAnimationFrame(frame);
-    frame = null;
-  };
+  const stop = () => { if (frame) cancelAnimationFrame(frame); frame = null; };
   if (!timing?.endsAt || !timing?.totalMs) {
     if (fillNode) fillNode.style.transform = 'scaleX(1)';
     if (labelNode) labelNode.textContent = '';
@@ -122,14 +104,14 @@ export function startCountdown({ fillNode, labelNode, timing, now }) {
   return stop;
 }
 
-export function renderLeaderboard(node, players, { meId = null, revealPoints = null } = {}) {
+export function renderLeaderboard(node, players, { meId = null, points = null } = {}) {
   if (!node) return;
   if (!players?.length) {
-    node.innerHTML = '<p class="muted">Nobody has joined yet.</p>';
+    node.innerHTML = '<p class="muted">Nobody here yet.</p>';
     return;
   }
   node.innerHTML = players.map((player) => {
-    const gained = revealPoints?.get?.(player.id);
+    const gained = points?.[player.id];
     const delta = gained ? `<span class="delta">+${gained}</span>` : '';
     const score = Number.isFinite(player.score) ? `${player.score.toLocaleString()}${delta}` : '';
     return `
@@ -140,6 +122,12 @@ export function renderLeaderboard(node, players, { meId = null, revealPoints = n
         <div class="score">${score}</div>
       </div>`;
   }).join('');
+}
+
+export function ordinal(n) {
+  if (!n) return '—';
+  const suffixes = ['th', 'st', 'nd', 'rd'];
+  return `${n}${suffixes[(n % 100 - 20) % 10] ?? suffixes[n % 100] ?? suffixes[0]}`;
 }
 
 export const storage = {

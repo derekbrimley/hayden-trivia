@@ -216,13 +216,15 @@ export function generateQuestion({ guestName, keywords, seed = 1, kind, star, id
  * least one question before any keyword repeats, and question kinds alternate so
  * the deck never feels like the same question four times.
  */
-export function generateDeck({ guestName = 'our guest of honor', keywords, count = 10, seed = Date.now() } = {}) {
+export function generateDeck({ guestName = 'our guest of honor', keywords, count = 10, seed = Date.now(), kinds: only } = {}) {
   const list = cleanKeywords(keywords);
   if (list.length < 3) {
     throw new Error('Give me at least 3 keywords — 12 makes the best game.');
   }
   const rng = makeRng(seed);
-  const kinds = availableKinds(list.length);
+  const available = availableKinds(list.length);
+  const kinds = only?.length ? available.filter((kind) => only.includes(kind)) : available;
+  if (!kinds.length) throw new Error('No usable question kinds for this list.');
 
   // Rotation: shuffle the keywords, walk the list, reshuffle when it runs out.
   let rotation = rng.shuffle(list);
@@ -262,4 +264,49 @@ export function generateDeck({ guestName = 'our guest of honor', keywords, count
   }
 
   return { seed, guestName, keywords: list, questions };
+}
+
+/**
+ * The offline fallback.
+ *
+ * When there is no API key, or Claude cannot be reached mid-party, the party
+ * still gets a game. These questions are simpler than the written ones — they
+ * ask which fact is real rather than what the guest would do — but they are
+ * built from the same notes and are playable in the same round.
+ */
+export function fallbackQuestions({ guestName, topics, count = 12, seed = Date.now() }) {
+  const byText = new Map();
+  for (const topic of topics ?? []) {
+    const key = normalize(topic.text);
+    if (key && !byText.has(key)) byText.set(key, topic);
+  }
+  const texts = [...byText.values()].map((topic) => topic.text);
+  // Notes are written as sentences now, not tidy keywords. "Which is their
+  // comfort food?" only reads well next to a noun, and pairing two sentences
+  // makes an option too long for a phone, so long notes use the plainer shapes.
+  const averageLength = texts.reduce((total, text) => total + text.length, 0) / (texts.length || 1);
+  const kinds = averageLength > 24
+    ? ['spot-the-real', 'odd-one-out']
+    : ['spot-the-real', 'odd-one-out', 'category', 'pair-up'];
+
+  const deck = generateDeck({ guestName, keywords: texts, count, seed, kinds });
+
+  return deck.questions.map((question) => {
+    // Tie each question back to the notes it used, so their authors sit it out.
+    const used = question.options
+      .map((option) => byText.get(normalize(option)))
+      .filter(Boolean)
+      .map((topic) => topic.id);
+    const star = byText.get(normalize(question.star ?? ''));
+    return {
+      id: question.id,
+      source: 'notes',
+      style: question.kind,
+      prompt: question.prompt,
+      options: question.options,
+      answerIndex: question.answerIndex,
+      explanation: question.explanation,
+      topicIds: [...new Set(star ? [star.id, ...used] : used)]
+    };
+  });
 }
