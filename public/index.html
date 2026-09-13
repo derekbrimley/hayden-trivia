@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Guest of Honor Trivia</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🎉</text></svg>" />
+</head>
+<body>
+  <main class="wrap wrap-narrow">
+    <div class="topbar">
+      <div class="brand"><span class="dot">🎉</span> Guest of Honor Trivia</div>
+      <div class="roomcode" id="room-code-label" hidden>Room <b id="room-code"></b></div>
+    </div>
+
+    <!-- Join ------------------------------------------------------------- -->
+    <section class="card" id="view-join">
+      <h2>Join the game</h2>
+      <p class="hint">Grab the four-letter code from the big screen.</p>
+      <form id="join-form">
+        <label class="field">Room code
+          <input id="join-code" type="text" inputmode="latin" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" maxlength="4"
+                 placeholder="ABCD" style="letter-spacing:0.3em;text-transform:uppercase" required />
+        </label>
+        <label class="field">Your name
+          <input id="join-name" type="text" autocomplete="nickname" maxlength="18"
+                 placeholder="What should we call you?" required />
+        </label>
+        <button class="big" type="submit" id="join-button" style="width:100%">Let me in</button>
+      </form>
+      <div class="notice" id="join-error" hidden></div>
+      <p class="muted center" style="margin-top:18px">
+        Hosting the party? <a href="/host" style="color:var(--brand)">Open the host screen</a>.
+      </p>
+    </section>
+
+    <!-- Waiting ---------------------------------------------------------- -->
+    <section class="card center" id="view-lobby" hidden>
+      <div style="font-size:4rem" id="me-avatar">🎈</div>
+      <h2 id="me-name">You're in</h2>
+      <p class="big-status pulse" id="lobby-status">Waiting for the host to start…</p>
+      <p class="hint" id="lobby-guest"></p>
+      <div class="board" id="lobby-board"></div>
+    </section>
+
+    <!-- Question --------------------------------------------------------- -->
+    <section id="view-question" hidden>
+      <div class="card">
+        <div class="qmeta">
+          <span id="q-counter"></span>
+          <span id="q-timer"></span>
+        </div>
+        <div class="timer"><div class="fill" id="q-fill"></div></div>
+        <h2 class="prompt compact" id="q-prompt"></h2>
+        <div class="options" id="q-options"></div>
+        <p class="reveal-line" id="q-status"></p>
+      </div>
+    </section>
+
+    <!-- Reveal ----------------------------------------------------------- -->
+    <section class="card center" id="view-reveal" hidden>
+      <div style="font-size:3.6rem" id="reveal-emoji">🎯</div>
+      <h2 id="reveal-headline"></h2>
+      <p class="reveal-line" id="reveal-detail"></p>
+      <div class="board" id="reveal-board"></div>
+    </section>
+
+    <!-- Finished --------------------------------------------------------- -->
+    <section class="card center" id="view-finished" hidden>
+      <h2 id="final-headline">That's a wrap!</h2>
+      <p class="big-status" id="final-detail"></p>
+      <div class="board" id="final-board"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/js/play.js"></script>
+</body>
+</html>

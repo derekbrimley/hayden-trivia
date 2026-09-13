@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Host · Guest of Honor Trivia</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🎤</text></svg>" />
+</head>
+<body>
+  <main class="wrap">
+    <div class="topbar">
+      <div class="brand"><span class="dot">🎤</span> Guest of Honor Trivia · Host</div>
+      <div class="roomcode" id="room-code-label" hidden>Room <b id="room-code"></b></div>
+    </div>
+
+    <!-- Setup ------------------------------------------------------------ -->
+    <section id="view-setup">
+      <div class="card">
+        <h2>Who are we celebrating?</h2>
+        <p class="hint">
+          Give me twelve things about the guest of honor and I'll build the trivia round.
+          Anything works: hobbies, foods they refuse to eat, the town they grew up in, the
+          one movie they quote constantly.
+        </p>
+        <form id="setup-form">
+          <label class="field">Guest of honor
+            <input id="guest-name" type="text" maxlength="40" placeholder="Hayden" required />
+          </label>
+
+          <label class="field" style="margin-bottom:8px">Twelve keywords</label>
+          <div class="keyword-grid" id="keyword-grid"></div>
+          <div class="button-row" style="margin-bottom:18px">
+            <button type="button" class="subtle" id="add-keyword">+ Add another</button>
+            <button type="button" class="subtle" id="load-example">Fill with an example</button>
+            <span class="muted" id="keyword-count">0 filled</span>
+          </div>
+
+          <div class="inline-fields" style="margin-bottom:18px">
+            <label class="field">Questions
+              <input id="question-count" type="number" min="3" max="30" value="12" />
+            </label>
+            <label class="field">Seconds per question
+              <input id="question-seconds" type="number" min="5" max="120" value="25" />
+            </label>
+            <label class="field">Seconds on the answer
+              <input id="reveal-seconds" type="number" min="3" max="60" value="10" />
+            </label>
+          </div>
+
+          <button class="big" type="submit" id="create-button">Build the game</button>
+        </form>
+        <div class="notice" id="setup-error" hidden></div>
+      </div>
+    </section>
+
+    <!-- Deck review + lobby ---------------------------------------------- -->
+    <section id="view-deck" hidden>
+      <div class="grid-2">
+        <div>
+          <div class="card">
+            <div class="spread">
+              <h2 style="margin:0">The deck</h2>
+              <div class="button-row">
+                <button class="subtle" id="regenerate">🎲 Reshuffle all</button>
+                <button class="subtle" id="claude-write" hidden>✨ Write with Claude</button>
+                <button class="subtle" id="add-question">+ Custom question</button>
+              </div>
+            </div>
+            <p class="hint" style="margin-top:10px">
+              You know the guest better than I do — fix anything that's wrong. Edit the text,
+              pick the green dot next to the true answer, or reroll a question you don't like.
+            </p>
+            <div id="deck-list"></div>
+            <div class="notice" id="deck-notice" hidden></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h2>Players join here</h2>
+            <div class="joinbox">
+              <div class="code-plate">
+                <div class="label">Room code</div>
+                <div class="code" id="lobby-code">····</div>
+              </div>
+              <div class="qr" id="qr-box" hidden></div>
+            </div>
+            <p class="join-url" style="margin-top:14px">
+              Go to <b id="join-url">…</b> on your phone
+            </p>
+            <p class="muted" id="join-url-note" hidden></p>
+          </div>
+
+          <div class="card">
+            <div class="spread">
+              <h2 style="margin:0">In the room</h2>
+              <span class="muted" id="player-count">0 players</span>
+            </div>
+            <div class="player-chips" id="player-chips"></div>
+            <p class="muted" id="empty-lobby">Nobody yet. Read out the code!</p>
+            <div class="button-row" style="margin-top:18px">
+              <button class="big" id="start-button" disabled>Start the game</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Question --------------------------------------------------------- -->
+    <section id="view-question" class="stage-screen" hidden>
+      <div class="card stage">
+        <div class="qmeta">
+          <span id="q-counter"></span>
+          <span id="q-answered"></span>
+          <span id="q-timer"></span>
+        </div>
+        <div class="timer"><div class="fill" id="q-fill"></div></div>
+        <h2 class="prompt" id="q-prompt"></h2>
+        <div class="options" id="q-options"></div>
+        <div class="button-row" style="justify-content:center;margin-top:22px">
+          <button class="ghost" id="skip-button">Reveal now</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Reveal ----------------------------------------------------------- -->
+    <section id="view-reveal" class="stage-screen" hidden>
+      <div class="card stage">
+        <div class="qmeta"><span id="r-counter"></span><span id="r-timer"></span></div>
+        <h2 class="prompt" id="r-prompt"></h2>
+        <div class="options" id="r-options"></div>
+        <p class="reveal-line" id="r-explanation"></p>
+        <div class="board board-centered" id="r-board"></div>
+        <div class="button-row" style="justify-content:center;margin-top:18px">
+          <button class="big" id="next-button">Next question</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Finished --------------------------------------------------------- -->
+    <section id="view-finished" class="stage-screen" hidden>
+      <div class="card stage">
+        <h2 style="font-size:clamp(1.8rem,5vw,3rem)" id="winner-line">🏆</h2>
+        <div class="podium" id="podium"></div>
+        <div class="board board-centered" id="final-board"></div>
+        <div class="button-row" style="justify-content:center;margin-top:20px">
+          <button id="again-button">Play again with the same deck</button>
+          <button class="ghost" id="newdeck-button">Fresh questions</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/js/host.js"></script>
+</body>
+</html>
