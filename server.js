@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { handleApi } from './src/router.js';
 import { sharedStore } from './src/store.js';
@@ -76,11 +76,14 @@ async function serveStatic(res, pathname) {
   }
 }
 
-// This process serves every request, so in-memory rooms are correct here and the
-// app should not warn about a missing database the way a hosted copy would.
-process.env.GOH_SINGLE_PROCESS = '1';
-
-const server = http.createServer(async (req, res) => {
+/**
+ * Handle one request: a static file, or the API.
+ *
+ * This is exported as the module's default because a host that treats this file
+ * as an entrypoint wants a plain (req, res) function. Exporting the http.Server
+ * instead is rejected by some of them.
+ */
+export async function requestListener(req, res) {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
   const segments = url.pathname.split('/').filter(Boolean);
 
@@ -108,7 +111,9 @@ const server = http.createServer(async (req, res) => {
     const payload = JSON.stringify({ error: error?.message ?? 'Something went wrong.' });
     res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' }).end(payload);
   }
-});
+}
+
+const server = http.createServer(requestListener);
 
 function localAddresses() {
   const out = [];
@@ -120,7 +125,18 @@ function localAddresses() {
   return out;
 }
 
-if (process.env.NODE_ENV !== 'test') {
+// Bind a port only when this file is run as a program. When something imports it
+// — a test, or a host wrapping the default export — binding would be pointless
+// at best and a crash at worst.
+const runAsProgram = Boolean(process.argv[1])
+  && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (runAsProgram) {
+  // Running as a program means one process serves every request, so keeping
+  // rooms in memory is correct here and is not worth warning about. A host that
+  // imports this file may run many copies, where it very much is.
+  process.env.GOH_SINGLE_PROCESS = '1';
+
   server.listen(PORT, HOST, () => {
     console.log('');
     console.log('  🎉  Guest of Honor Trivia is running.');
@@ -137,8 +153,4 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 export { server };
-
-// Only the local dev server uses this file. It is exported as the default too so
-// that a host which expects an entrypoint to export a request handler gets one
-// instead of a module that merely listens.
-export default server;
+export default requestListener;

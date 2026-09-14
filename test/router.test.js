@@ -354,3 +354,13 @@ test('health explains the TCP-instead-of-REST mistake', async () => {
   });
   assert.match(result.json.issues.storage, /KV_REST_API_URL/);
 });
+
+test('ping answers through the router as well as the standalone function', async () => {
+  const { call } = harness();
+  const result = await call('GET', 'ping');
+  assert.equal(result.status, 200);
+  assert.equal(result.json.pong, true);
+  assert.equal(result.json.served, 'router');
+  for (const value of Object.values(result.json.sees)) assert.equal(typeof value, 'boolean');
+  assert.ok(!JSON.stringify(result.json).includes('sk-ant'), 'never echo a key');
+});

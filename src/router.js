@@ -311,6 +311,24 @@ export async function handleApi({ method, segments, query, body = {}, store, env
   // segments: everything after /api
   const [head, code, action] = segments;
 
+  // Mirrors api/ping.js, so the same check works whether this deployment serves
+  // /api through the standalone function or through the server entrypoint.
+  if (head === 'ping' && method === 'GET') {
+    return json(200, {
+      pong: true,
+      node: process.version,
+      served: 'router',
+      sees: {
+        KV_REST_API_URL: Boolean(env.KV_REST_API_URL),
+        KV_REST_API_TOKEN: Boolean(env.KV_REST_API_TOKEN),
+        UPSTASH_REDIS_REST_URL: Boolean(env.UPSTASH_REDIS_REST_URL),
+        UPSTASH_REDIS_REST_TOKEN: Boolean(env.UPSTASH_REDIS_REST_TOKEN),
+        REDIS_URL: Boolean(env.REDIS_URL),
+        ANTHROPIC_API_KEY: Boolean(env.ANTHROPIC_API_KEY)
+      }
+    });
+  }
+
   if (head === 'health' && method === 'GET') {
     const storage = storageDiagnosis(env);
     const hasClaude = claudeIsConfigured(env);
