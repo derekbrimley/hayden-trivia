@@ -314,20 +314,21 @@ export async function handleApi({ method, segments, query, body = {}, store, env
   if (head === 'health' && method === 'GET') {
     const storage = storageDiagnosis(env);
     const hasClaude = claudeIsConfigured(env);
+    // The local dev server is one process, so keeping rooms in memory is correct
+    // there and is not worth warning about. On a host that runs many instances
+    // it is the difference between one game and several private ones.
+    const singleProcess = env.GOH_SINGLE_PROCESS === '1';
+    const storageOk = storage.kind === 'redis' || singleProcess;
     return json(200, {
       ok: true,
-      ready: storage.kind === 'redis' && hasClaude,
+      ready: storageOk && hasClaude,
       storage: store.kind,
+      singleProcess,
       claude: hasClaude,
       // One message per thing that needs fixing, so a checker can show each once.
       issues: {
-        storage: storage.problem
-          ?? (storage.kind === 'memory'
-            ? 'Players on different devices will not see the same room.'
-            : null),
-        claude: hasClaude
-          ? null
-          : 'Questions fall back to the simpler offline set.'
+        storage: storage.problem ?? (storageOk ? null : 'Players on different devices will not see the same room.'),
+        claude: hasClaude ? null : 'Questions fall back to the simpler offline set.'
       }
     });
   }

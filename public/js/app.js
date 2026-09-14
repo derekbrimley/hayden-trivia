@@ -446,3 +446,38 @@ function renderFinished(view) {
   $('#again-button').hidden = !view.isHost;
   $('#fresh-button').hidden = !view.isHost;
 }
+
+/* --------------------------------------------------------------------- boot */
+
+// Tells the boot guard in index.html that the buttons are wired up. If this
+// never runs, the guard puts the reason on the page instead of leaving the
+// buttons silently dead.
+window.__appBooted = true;
+
+/**
+ * Check the deployment as soon as the page opens.
+ *
+ * A missing database looks fine right up until two people try to join the same
+ * room, and an API that isn't answering looks like a button that does nothing.
+ * Both are worth saying out loud, on the page, before anyone starts a game.
+ */
+(async function checkDeployment() {
+  try {
+    const health = await api('/api/health', null, 'GET');
+    if (health.issues?.storage) {
+      window.__showPageNotice?.(
+        `This deployment has no database connected, so ${health.issues.storage.toLowerCase()} `
+        + 'Add the Redis store and redeploy.'
+      );
+    } else if (health.issues?.claude) {
+      window.__showPageNotice?.(
+        `No Claude API key on this deployment, so ${health.issues.claude.toLowerCase()}`, 'ok'
+      );
+    }
+  } catch (error) {
+    window.__showPageNotice?.(
+      `The page loaded but the game server is not answering (${error.message}). `
+      + 'Check /api/ping and /api/health.'
+    );
+  }
+})();

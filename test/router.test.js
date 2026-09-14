@@ -318,6 +318,18 @@ test('health names each deployment problem once', async () => {
   assert.match(bare.issues.storage, /same room/);
   assert.match(bare.issues.claude, /offline set/);
 
+  // The single-process dev server keeps rooms in memory on purpose.
+  const local = await handleApi({
+    method: 'GET',
+    segments: ['health'],
+    query: {},
+    body: {},
+    store: createMemoryStore(),
+    env: { GOH_SINGLE_PROCESS: '1', ANTHROPIC_API_KEY: 'k' }
+  });
+  assert.equal(local.json.issues.storage, null, 'memory is fine when one process serves everything');
+  assert.equal(local.json.ready, true);
+
   const configured = await handleApi({
     method: 'GET',
     segments: ['health'],

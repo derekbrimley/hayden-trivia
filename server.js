@@ -76,6 +76,10 @@ async function serveStatic(res, pathname) {
   }
 }
 
+// This process serves every request, so in-memory rooms are correct here and the
+// app should not warn about a missing database the way a hosted copy would.
+process.env.GOH_SINGLE_PROCESS = '1';
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
   const segments = url.pathname.split('/').filter(Boolean);

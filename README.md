@@ -74,6 +74,11 @@ serving `public/` as static files with `api/` as functions. `vercel.json` pins
 `"framework": null` to prevent it; if the dashboard still shows something else, change it
 there and redeploy.
 
+**Buttons that do nothing.** The page now says why. A banner across the top names the
+problem — the API not answering, or no database connected — and if the app script itself
+fails to load, a guard that runs without it puts that on the page too. A dead button with
+no message should no longer be possible.
+
 Then narrow it down with two URLs:
 
 | URL | What it means |

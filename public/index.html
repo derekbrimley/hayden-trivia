@@ -10,11 +10,47 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🎉</text></svg>" />
 </head>
 <body>
+  <!--
+    Boot guard. If the app script fails to load or throws before it wires up the
+    buttons, clicking them does nothing at all and the page looks merely broken.
+    This runs as a classic script — no modules, no imports — so it survives that
+    failure and puts the reason on screen.
+  -->
+  <script>
+    window.__appBooted = false;
+    window.__showPageNotice = function (message, kind) {
+      var node = document.getElementById('page-notice');
+      if (!node) return;
+      node.textContent = message;
+      node.className = 'notice ' + (kind || 'error');
+      node.hidden = false;
+    };
+    window.addEventListener('error', function (event) {
+      var where = event.filename ? ' (' + event.filename + ')' : '';
+      window.__showPageNotice('The page hit an error: ' + event.message + where);
+    });
+    window.addEventListener('unhandledrejection', function (event) {
+      var reason = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+      window.__showPageNotice('The page hit an error: ' + reason);
+    });
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        if (!window.__appBooted) {
+          window.__showPageNotice(
+            'The app script did not load, so the buttons do nothing. Check that /js/app.js is '
+            + 'being served, and look in the browser console for the reason.'
+          );
+        }
+      }, 2500);
+    });
+  </script>
   <main class="wrap wrap-narrow">
     <div class="topbar">
       <div class="brand"><span class="dot">🎉</span> Guest of Honor Trivia</div>
       <div class="roomcode" id="room-code-label" hidden>Room <b id="room-code"></b></div>
     </div>
+
+    <div class="notice" id="page-notice" hidden></div>
 
     <!-- Landing ---------------------------------------------------------- -->
     <section id="view-landing">
