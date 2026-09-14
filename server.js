@@ -133,3 +133,8 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 export { server };
+
+// Only the local dev server uses this file. It is exported as the default too so
+// that a host which expects an entrypoint to export a request handler gets one
+// instead of a module that merely listens.
+export default server;

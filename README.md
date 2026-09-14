@@ -64,6 +64,27 @@ It tells you whether the store and the key are both live, and what to fix if not
 Writing the questions is the one slow request — `vercel.json` gives it 60 seconds, which
 is the Hobby plan's maximum.
 
+### If the deployment crashes
+
+**`500: INTERNAL_SERVER_ERROR` / `FUNCTION_INVOCATION_FAILED`.** Check the framework
+preset first: **Settings** → **General** → **Framework Preset** must be **Other**. Vercel
+sometimes auto-detects this repo as the *Node.js* preset, because `package.json` has a
+`main` and a `start` script, and then tries to run `server.js` as the whole app instead of
+serving `public/` as static files with `api/` as functions. `vercel.json` pins
+`"framework": null` to prevent it; if the dashboard still shows something else, change it
+there and redeploy.
+
+Then narrow it down with two URLs:
+
+| URL | What it means |
+|---|---|
+| `/api/ping` fails too | The project's build or runtime settings are wrong — start with the framework preset above. `ping` imports nothing, so it cannot fail on this app's own code. |
+| `/api/ping` works, `/api/health` does not | The fault is in the app. `/api/health` now answers with the error message and a short stack instead of a blank crash page. |
+
+`/api/ping` also reports which environment variables the function can see — as true/false,
+never their values — which is the quickest way to spot a variable that was added but never
+picked up, because Vercel only applies new variables on a new deployment.
+
 ## Or run it at home
 
 ```bash
