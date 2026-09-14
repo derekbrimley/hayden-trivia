@@ -74,6 +74,11 @@ serving `public/` as static files with `api/` as functions. `vercel.json` pins
 `"framework": null` to prevent it; if the dashboard still shows something else, change it
 there and redeploy.
 
+**Guests get a login screen.** Vercel Authentication protects every `*.vercel.app` URL
+by default on some accounts, so the owner can open the app and nobody else can. Turn it
+off at **Settings** → **Deployment Protection** → **Vercel Authentication**. The game
+still needs a room code to join, so the link alone gives nothing away.
+
 **Buttons that do nothing.** The page now says why. A banner across the top names the
 problem — the API not answering, or no database connected — and if the app script itself
 fails to load, a guard that runs without it puts that on the page too. A dead button with
