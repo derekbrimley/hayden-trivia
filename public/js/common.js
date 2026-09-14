@@ -20,7 +20,13 @@ export async function api(path, body, method = 'POST') {
   });
   let payload = null;
   try { payload = await response.json(); } catch { payload = null; }
-  if (!response.ok) throw new Error(payload?.error ?? `Request failed (${response.status})`);
+  if (!response.ok) {
+    // Carry the status: a 404 or 403 means the room or the player is gone,
+    // which needs a different response from "the network hiccuped".
+    const error = new Error(payload?.error ?? `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return payload;
 }
 
@@ -50,19 +56,28 @@ export function startPolling({ url, onState, onError, intervalFor }) {
 
   async function tick() {
     if (stopped) return;
+    let state = null;
     try {
-      const state = await api(url(), null, 'GET');
-      failures = 0;
-      if (typeof state.serverTime === 'number') clock.offsetMs = state.serverTime - Date.now();
-      setBanner(null);
-      onState(state);
+      state = await api(url(), null, 'GET');
     } catch (error) {
+      // A poller that has been replaced must stay quiet. Its last request can
+      // land after a new one has started, and acting on it would tear down a
+      // session that is perfectly healthy.
+      if (stopped) return;
       failures += 1;
-      if (failures >= 3) {
-        setBanner('Reconnecting…');
-        onError?.(error);
-      }
+      // Only a connection problem deserves "Reconnecting". A refusal from the
+      // server is an answer, and retrying will not change it.
+      if (!error.status && failures >= 2) setBanner('Reconnecting…');
+      onError?.(error, failures);
+      if (!stopped) timer = setTimeout(tick, intervalFor());
+      return;
     }
+
+    if (stopped) return;
+    failures = 0;
+    if (typeof state.serverTime === 'number') clock.offsetMs = state.serverTime - Date.now();
+    setBanner(null);
+    onState(state);
     if (!stopped) timer = setTimeout(tick, intervalFor());
   }
 

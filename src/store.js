@@ -124,7 +124,17 @@ export function createRedisStore({ url, token, fetchImpl = fetch }) {
     return out;
   };
 
-  const parseValues = (flat) => Object.values(parseHash(flat)).map((value) => JSON.parse(value));
+  const parseValues = (flat) => Object.entries(parseHash(flat)).map(([field, value]) => {
+    // Already-decoded objects are fine; anything else has to be readable JSON,
+    // and if it is not, say which field rather than failing with a bare
+    // "Unexpected token" from somewhere deep in a request handler.
+    if (value && typeof value === 'object') return value;
+    try {
+      return JSON.parse(value);
+    } catch {
+      throw new Error(`Stored value for "${field}" is not readable JSON (got ${typeof value}).`);
+    }
+  });
 
   return {
     kind: 'redis',

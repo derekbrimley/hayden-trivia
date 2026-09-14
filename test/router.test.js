@@ -365,11 +365,43 @@ test('ping answers through the router as well as the standalone function', async
   assert.ok(!JSON.stringify(result.json).includes('sk-ant'), 'never echo a key');
 });
 
-test('a deep health check exercises the store and reports success', async () => {
+test('a deep health check exercises every storage call the game makes', async () => {
   const { call } = harness();
   const result = await call('GET', 'health', { query: { deep: '1' } });
   assert.equal(result.status, 200);
-  assert.deepEqual(result.json.probe, { ok: true, wrote: true, readBack: true, locks: true });
+  assert.equal(result.json.probe.ok, true);
+  // Reading players, notes and answers uses hashes — a different command from
+  // writing the room, and the one a half-working store tends to fail on.
+  for (const step of ['write a room', 'read the room back', 'list players', 'list notes', 'read answers', 'take a lock']) {
+    assert.ok(result.json.probe.steps.includes(step), `the probe should ${step}`);
+  }
+});
+
+test('the deep check names the step where storage broke', async () => {
+  const half = {
+    kind: 'redis',
+    rooms: new Map(),
+    async saveRoom(room) { this.rooms.set(room.code, room); },
+    async loadRoom(code) { return this.rooms.get(code) ?? null; },
+    async savePlayer() {},
+    // Hash reads are exactly what the state endpoint needs and the old probe missed.
+    async loadPlayers() { throw new Error('Stored value for "p1" is not readable JSON (got string).'); },
+    async loadTopics() { return []; },
+    async loadAnswers() { return {}; },
+    async addTopics() {},
+    async saveAnswer() {},
+    async deleteRoom() {},
+    async tryLock() { return true; }
+  };
+  const result = await handleApi({
+    method: 'GET', segments: ['health'], query: { deep: '1' }, body: {}, store: half,
+    env: { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 't', ANTHROPIC_API_KEY: 'k' }
+  });
+  assert.equal(result.json.probe.ok, false);
+  assert.equal(result.json.probe.failedAt, 'list players');
+  assert.match(result.json.probe.error, /not readable JSON/);
+  assert.deepEqual(result.json.probe.completed, ['write a room', 'read the room back', 'write a player']);
+  assert.equal(result.json.ready, false);
 });
 
 test('a deep health check reports a store that refuses to answer', async () => {
@@ -377,9 +409,12 @@ test('a deep health check reports a store that refuses to answer', async () => {
     kind: 'redis',
     async saveRoom() { throw new Error('Storage request failed (401). Check your Redis credentials.'); },
     async loadRoom() { return null; },
+    async savePlayer() {},
     async loadPlayers() { return []; },
     async loadTopics() { return []; },
     async loadAnswers() { return {}; },
+    async addTopics() {},
+    async saveAnswer() {},
     async deleteRoom() {},
     async tryLock() { return true; }
   };
@@ -392,6 +427,7 @@ test('a deep health check reports a store that refuses to answer', async () => {
     env: { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 'wrong', ANTHROPIC_API_KEY: 'k' }
   });
   assert.equal(result.json.probe.ok, false);
+  assert.equal(result.json.probe.failedAt, 'write a room');
   assert.match(result.json.probe.error, /401/);
   assert.equal(result.json.ready, false, 'a store that cannot be written to is not ready');
   assert.match(result.json.issues.storage, /not answering/);
@@ -402,9 +438,12 @@ test('a deep check notices a store that writes but cannot read back', async () =
     kind: 'redis',
     async saveRoom() {},
     async loadRoom() { return null; },
+    async savePlayer() {},
     async loadPlayers() { return []; },
     async loadTopics() { return []; },
     async loadAnswers() { return {}; },
+    async addTopics() {},
+    async saveAnswer() {},
     async deleteRoom() {},
     async tryLock() { return true; }
   };
@@ -413,6 +452,7 @@ test('a deep check notices a store that writes but cannot read back', async () =
     env: { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 't' }
   });
   assert.equal(result.json.probe.ok, false);
+  assert.equal(result.json.probe.failedAt, 'read the room back');
   assert.match(result.json.probe.error, /read back nothing/);
 });
 

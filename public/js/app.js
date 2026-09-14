@@ -48,6 +48,9 @@ let renderedKey = null;   // avoids redrawing (and stealing focus) on every poll
 let pendingChoice = null;
 let submittedTopics = false;
 let busy = false;
+// Bumped every time we start following a room, so a poller from a previous
+// session can be recognised as stale and ignored.
+let generation = 0;
 
 function show(name) {
   for (const [key, node] of Object.entries(views)) node.hidden = key !== name;
@@ -66,7 +69,9 @@ if (codeFromUrl) $('#join-code').value = codeFromUrl;
 
 const saved = storage.get(SESSION_KEY);
 if (saved?.code && saved?.playerId && saved?.token) {
-  resume(saved);
+  // Restored from a previous visit: the room may be long gone, which is normal
+  // and not worth an error message.
+  resume(saved, { restored: true });
 } else {
   show('landing');
   if (codeFromUrl) $('#join-name').focus();
@@ -119,13 +124,14 @@ $('#join-form').addEventListener('submit', async (event) => {
   }
 });
 
-function resume(next) {
+function resume(next, { restored = false } = {}) {
   session = next;
   storage.set(SESSION_KEY, session);
   setRoomLabel(session.code);
   poller?.stop();
   renderedKey = null;
 
+  const mine = ++generation;
   poller = startPolling({
     url: () => `/api/rooms/${encodeURIComponent(session.code)}/state`
       + `?playerId=${encodeURIComponent(session.playerId)}&token=${encodeURIComponent(session.token)}`,
@@ -135,16 +141,29 @@ function resume(next) {
       if (state.phase === 'building') return 1500;
       return 2500;
     },
-    onState: render,
-    onError: (error) => {
-      // A room that no longer exists (server restart, expiry) sends us home.
-      if (/lost track|No room/i.test(error.message)) leaveRoom(error.message);
+    onState: (view) => {
+      if (mine === generation) render(view);
+    },
+    onError: (error, attempt) => {
+      if (mine !== generation) return;
+      // The room expired or this player is unknown to it. Retrying cannot fix
+      // either, so go back to the start — quietly if we only restored it.
+      if (error.status === 404 || error.status === 403) {
+        leaveRoom(restored ? null : error.message);
+        return;
+      }
+      // Anything else that keeps failing is worth saying out loud.
+      if (attempt >= 3) {
+        window.__showPageNotice?.(`The game server keeps failing: ${error.message}`);
+      }
     }
   });
 }
 
 function leaveRoom(message) {
+  generation += 1;
   poller?.stop();
+  renderedKey = null;
   storage.clear(SESSION_KEY);
   session = null;
   state = null;

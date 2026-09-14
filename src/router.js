@@ -89,30 +89,75 @@ async function maybeAdvance(store, state, now = Date.now()) {
  */
 async function probeStorage(store) {
   const code = `HP${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-  const probe = {
-    code,
-    guestName: 'health probe',
-    phase: 'lobby',
-    questions: [],
-    settings: {},
-    version: 1,
-    createdAt: Date.now(),
-    updatedAt: Date.now()
-  };
-  try {
-    await store.saveRoom(probe);
-    const readBack = await store.loadRoom(code);
-    const firstLock = await store.tryLock(`probe:${code}`, 5);
-    const secondLock = await store.tryLock(`probe:${code}`, 5);
-    await store.deleteRoom(code);
+  const done = [];
+  let current = null;
 
-    if (!readBack) return { ok: false, error: 'Wrote a room but read back nothing. Check the token can write.' };
-    if (!firstLock || secondLock) {
-      return { ok: false, error: 'Locking is not working, so a round could be scored twice.' };
-    }
-    return { ok: true, wrote: true, readBack: true, locks: true };
+  // Each step includes its own check, so a step only counts as done once what it
+  // wrote can be read back. Otherwise the blame lands on the next step along.
+  const step = async (name, fn) => {
+    current = name;
+    await fn();
+    done.push(name);
+  };
+
+  try {
+    // Every call the game makes, in the order it makes them. A probe that only
+    // writes a room proves less than it looks: players, notes and answers live
+    // in hashes, which is a different command and a different response shape.
+    await step('write a room', () => store.saveRoom({
+      code, guestName: 'health probe', phase: 'lobby', questions: [],
+      settings: {}, version: 1, createdAt: Date.now(), updatedAt: Date.now()
+    }));
+
+    await step('read the room back', async () => {
+      const room = await store.loadRoom(code);
+      if (!room) throw new Error('wrote a room but read back nothing — can the token write?');
+    });
+
+    await step('write a player', () => store.savePlayer(code, {
+      id: 'probe-player', token: 'probe', name: 'Probe', avatar: '🧪', isHost: true,
+      score: 0, streak: 0, correctCount: 0, topicCount: 0, joinedAt: Date.now()
+    }));
+
+    await step('list players', async () => {
+      const players = await store.loadPlayers(code);
+      if (players.length !== 1) throw new Error(`expected one player back, got ${players.length}`);
+    });
+
+    await step('write a note', () => store.addTopics(code, [
+      { id: 'probe-topic', text: 'health probe', playerId: 'probe-player' }
+    ]));
+
+    await step('list notes', async () => {
+      const topics = await store.loadTopics(code);
+      if (topics.length !== 1) throw new Error(`expected one note back, got ${topics.length}`);
+    });
+
+    await step('write an answer', () => store.saveAnswer(code, 'probe-question', 'probe-player', {
+      choice: 0, elapsedMs: 1, correct: true
+    }));
+
+    await step('read answers', async () => {
+      const answers = await store.loadAnswers(code, 'probe-question');
+      if (!answers['probe-player']) throw new Error('wrote an answer but read back nothing');
+    });
+
+    await step('take a lock', async () => {
+      const first = await store.tryLock(`probe:${code}`, 5);
+      const second = await store.tryLock(`probe:${code}`, 5);
+      if (!first || second) throw new Error('locking is not working, so a round could score twice');
+    });
+
+    await step('clean up', () => store.deleteRoom(code));
+    return { ok: true, steps: done };
   } catch (error) {
-    return { ok: false, error: error?.message ?? String(error) };
+    // Name the step that failed, because "it did not work" is not a diagnosis.
+    return {
+      ok: false,
+      completed: done,
+      failedAt: current,
+      error: error?.message ?? String(error)
+    };
   }
 }
 
