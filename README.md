@@ -89,7 +89,8 @@ Then narrow it down with two URLs:
 | URL | What it means |
 |---|---|
 | `/api/ping` fails too | The project's build or runtime settings are wrong — start with the framework preset above. `ping` imports nothing, so it cannot fail on this app's own code. |
-| `/api/ping` works, `/api/health` does not | The fault is in the app. `/api/health` now answers with the error message and a short stack instead of a blank crash page. |
+| `/api/ping` works, `/api/health` does not | `ping` is its own file and `health` goes through the catch-all route, so this means the API routing is the problem, not the app's logic. |
+| Both work | Open `/api/health?deep=1`. It writes a row, reads it back and takes a lock, so it reports a database that is configured but refusing writes — which nothing else catches until someone tries to start a game. |
 
 `/api/ping` also reports which environment variables the function can see — as true/false,
 never their values — which is the quickest way to spot a variable that was added but never

@@ -364,3 +364,73 @@ test('ping answers through the router as well as the standalone function', async
   for (const value of Object.values(result.json.sees)) assert.equal(typeof value, 'boolean');
   assert.ok(!JSON.stringify(result.json).includes('sk-ant'), 'never echo a key');
 });
+
+test('a deep health check exercises the store and reports success', async () => {
+  const { call } = harness();
+  const result = await call('GET', 'health', { query: { deep: '1' } });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.json.probe, { ok: true, wrote: true, readBack: true, locks: true });
+});
+
+test('a deep health check reports a store that refuses to answer', async () => {
+  const broken = {
+    kind: 'redis',
+    async saveRoom() { throw new Error('Storage request failed (401). Check your Redis credentials.'); },
+    async loadRoom() { return null; },
+    async loadPlayers() { return []; },
+    async loadTopics() { return []; },
+    async loadAnswers() { return {}; },
+    async deleteRoom() {},
+    async tryLock() { return true; }
+  };
+  const result = await handleApi({
+    method: 'GET',
+    segments: ['health'],
+    query: { deep: '1' },
+    body: {},
+    store: broken,
+    env: { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 'wrong', ANTHROPIC_API_KEY: 'k' }
+  });
+  assert.equal(result.json.probe.ok, false);
+  assert.match(result.json.probe.error, /401/);
+  assert.equal(result.json.ready, false, 'a store that cannot be written to is not ready');
+  assert.match(result.json.issues.storage, /not answering/);
+});
+
+test('a deep check notices a store that writes but cannot read back', async () => {
+  const amnesiac = {
+    kind: 'redis',
+    async saveRoom() {},
+    async loadRoom() { return null; },
+    async loadPlayers() { return []; },
+    async loadTopics() { return []; },
+    async loadAnswers() { return {}; },
+    async deleteRoom() {},
+    async tryLock() { return true; }
+  };
+  const result = await handleApi({
+    method: 'GET', segments: ['health'], query: { deep: '1' }, body: {}, store: amnesiac,
+    env: { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 't' }
+  });
+  assert.equal(result.json.probe.ok, false);
+  assert.match(result.json.probe.error, /read back nothing/);
+});
+
+test('the shallow health check does not touch the store', async () => {
+  let touched = false;
+  const watcher = {
+    kind: 'redis',
+    async saveRoom() { touched = true; },
+    async loadRoom() { touched = true; return null; },
+    async loadPlayers() { return []; },
+    async loadTopics() { return []; },
+    async loadAnswers() { return {}; },
+    async deleteRoom() { touched = true; },
+    async tryLock() { touched = true; return true; }
+  };
+  await handleApi({
+    method: 'GET', segments: ['health'], query: {}, body: {}, store: watcher,
+    env: { KV_REST_API_URL: 'https://db.upstash.io', KV_REST_API_TOKEN: 't' }
+  });
+  assert.equal(touched, false, 'the plain health check must stay cheap');
+});

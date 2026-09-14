@@ -79,6 +79,43 @@ async function maybeAdvance(store, state, now = Date.now()) {
   return state;
 }
 
+
+/**
+ * Actually use the storage, rather than trusting that the variables look right.
+ *
+ * Credentials can be present and still be refused, and that difference is
+ * invisible until someone tries to start a game. One write, one read, one lock,
+ * then clean up after itself.
+ */
+async function probeStorage(store) {
+  const code = `HP${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+  const probe = {
+    code,
+    guestName: 'health probe',
+    phase: 'lobby',
+    questions: [],
+    settings: {},
+    version: 1,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  };
+  try {
+    await store.saveRoom(probe);
+    const readBack = await store.loadRoom(code);
+    const firstLock = await store.tryLock(`probe:${code}`, 5);
+    const secondLock = await store.tryLock(`probe:${code}`, 5);
+    await store.deleteRoom(code);
+
+    if (!readBack) return { ok: false, error: 'Wrote a room but read back nothing. Check the token can write.' };
+    if (!firstLock || secondLock) {
+      return { ok: false, error: 'Locking is not working, so a round could be scored twice.' };
+    }
+    return { ok: true, wrote: true, readBack: true, locks: true };
+  } catch (error) {
+    return { ok: false, error: error?.message ?? String(error) };
+  }
+}
+
 /* -------------------------------------------------------------------- handlers */
 
 async function createRoomHandler({ body, store }) {
@@ -337,7 +374,7 @@ export async function handleApi({ method, segments, query, body = {}, store, env
     // it is the difference between one game and several private ones.
     const singleProcess = env.GOH_SINGLE_PROCESS === '1';
     const storageOk = storage.kind === 'redis' || singleProcess;
-    return json(200, {
+    const body = {
       ok: true,
       ready: storageOk && hasClaude,
       storage: store.kind,
@@ -348,7 +385,16 @@ export async function handleApi({ method, segments, query, body = {}, store, env
         storage: storage.problem ?? (storageOk ? null : 'Players on different devices will not see the same room.'),
         claude: hasClaude ? null : 'Questions fall back to the simpler offline set.'
       }
-    });
+    };
+    // ?deep=1 proves the storage really answers, instead of only looking configured.
+    if (query.deep) {
+      body.probe = await probeStorage(store);
+      if (!body.probe.ok) {
+        body.ready = false;
+        body.issues.storage = `The database is not answering: ${body.probe.error}`;
+      }
+    }
+    return json(200, body);
   }
 
   if (head === 'rooms' && !code && method === 'POST') {

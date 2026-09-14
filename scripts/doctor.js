@@ -30,16 +30,18 @@ if (target) {
   const base = target.replace(/\/+$/, '');
   let health;
   try {
-    const response = await fetch(`${base}/api/health`);
+    const response = await fetch(`${base}/api/health?deep=1`);
     health = await response.json();
   } catch (error) {
     report(false, 'The deployment did not answer.', error.message);
     process.exit(1);
   }
   const issues = health.issues ?? {};
+  // A store that is configured but refuses writes is not "connected".
+  const storageWorks = health.storage === 'redis' && (!health.probe || health.probe.ok);
   report(
-    health.storage === 'redis',
-    health.storage === 'redis' ? 'Redis store connected.' : 'No Redis store connected.',
+    storageWorks,
+    storageWorks ? 'Redis store connected.' : 'The Redis store is not usable.',
     issues.storage
   );
   report(
@@ -47,6 +49,11 @@ if (target) {
     health.claude ? 'ANTHROPIC_API_KEY is set.' : 'No ANTHROPIC_API_KEY.',
     issues.claude
   );
+  if (health.probe) {
+    report(health.probe.ok, health.probe.ok
+      ? 'Wrote to the database and read it back.'
+      : 'The database did not accept a write.', health.probe.error);
+  }
   if (health.ready) console.log('\nReady for a party.\n');
   else console.log('\nFix the items above, then redeploy — Vercel only picks up new variables on a new deploy.\n');
   process.exit(health.ready ? 0 : 1);
